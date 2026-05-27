@@ -159,5 +159,17 @@ def compute_decision(s: Snapshot) -> Decision:
             leftover_w=None,
         )
 
-    # Auto mode is handled in subsequent tasks.
-    raise NotImplementedError("auto mode not yet implemented")
+    # Auto mode → time-of-day sub-mode
+    sub = pick_submode(s.now, s.sun_state, s.dinner_start, s.night_start)
+
+    if sub is SubMode.DINNER:
+        return Decision(
+            desired_amps=DINNER_AMPS,
+            write_action=_write_action_for(DINNER_AMPS, s.last_desired_amps),
+            sub_mode=SubMode.DINNER,
+            reason=f"dinner cap: {DINNER_AMPS}A",
+            leftover_w=None,
+        )
+
+    # Solar and night sub-modes are handled in subsequent tasks.
+    raise NotImplementedError(f"sub-mode {sub.value} not yet implemented")

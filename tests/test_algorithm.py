@@ -145,3 +145,43 @@ def test_force_max_from_charging(base_snapshot: Snapshot) -> None:
     d = compute_decision(s)
     assert d.desired_amps == 16
     assert d.write_action is WriteAction.SET_AMPS
+
+
+def test_dinner_caps_at_6a(base_snapshot: Snapshot) -> None:
+    """At 17:00, dinner sub-mode applies the 6A cap."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 17, 0, tzinfo=UTC),
+        last_desired_amps=None,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 6
+    assert d.sub_mode is SubMode.DINNER
+    assert d.write_action is WriteAction.TURN_ON_AND_SET
+
+
+def test_dinner_ignores_solar_surplus(base_snapshot: Snapshot) -> None:
+    """Dinner mode caps at 6A even with massive solar export."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 18, 0, tzinfo=UTC),
+        net_grid_w=-4000.0,  # huge export
+        last_desired_amps=10,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 6
+    assert d.sub_mode is SubMode.DINNER
+
+
+def test_dinner_ignores_soc(base_snapshot: Snapshot) -> None:
+    """Dinner mode caps at 6A regardless of SOC vs target."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 19, 0, tzinfo=UTC),
+        ev_soc=95.0,
+        target_day_soc=50.0,
+        last_desired_amps=6,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 6
+    assert d.write_action is WriteAction.NONE  # no change
