@@ -1,0 +1,12 @@
+{
+  "domain": "ev_solar_charger",
+  "name": "EV Solar Charger",
+  "version": "0.1.0",
+  "iot_class": "local_polling",
+  "config_flow": true,
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@naps62"],
+  "documentation": "https://git.naps.pt/homeassistant/ev-solar-charger",
+  "issue_tracker": "https://git.naps.pt/homeassistant/ev-solar-charger/issues"
+}
