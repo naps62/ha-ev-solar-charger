@@ -73,3 +73,23 @@ class Decision:
     sub_mode: SubMode
     reason: str
     leftover_w: float | None
+
+
+def pick_submode(
+    now: datetime,
+    sun_state: SunState,
+    dinner_start: time,
+    night_start: time,
+) -> SubMode:
+    """Resolve the current sub-mode from time-of-day and sun state.
+
+    Rules:
+    - dinner window (always wins when active)
+    - else: solar if sun above, else night
+    """
+    h = now.time()
+    if dinner_start <= h < night_start:
+        return SubMode.DINNER
+    if sun_state is SunState.ABOVE and h < dinner_start:
+        return SubMode.SOLAR
+    return SubMode.NIGHT

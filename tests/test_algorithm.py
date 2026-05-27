@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, time
+
+import pytest
+
 from custom_components.ev_solar_charger.algorithm import (
     Decision,
     Mode,
@@ -9,6 +13,7 @@ from custom_components.ev_solar_charger.algorithm import (
     SubMode,
     SunState,
     WriteAction,
+    pick_submode,
 )
 
 
@@ -57,3 +62,28 @@ def test_write_action_enum_values() -> None:
 def test_sun_state_enum_values() -> None:
     assert SunState.ABOVE.value == "above_horizon"
     assert SunState.BELOW.value == "below_horizon"
+
+
+@pytest.mark.parametrize(
+    ("hour", "minute", "sun", "expected"),
+    [
+        (10, 0, SunState.ABOVE, SubMode.SOLAR),     # mid-morning, sun up
+        (15, 59, SunState.ABOVE, SubMode.SOLAR),    # just before dinner
+        (16, 0, SunState.ABOVE, SubMode.DINNER),    # boundary: dinner starts
+        (21, 59, SunState.ABOVE, SubMode.DINNER),   # just before night
+        (22, 0, SunState.ABOVE, SubMode.NIGHT),     # boundary: night starts
+        (23, 30, SunState.BELOW, SubMode.NIGHT),    # late night
+        (5, 30, SunState.BELOW, SubMode.NIGHT),     # pre-dawn, sun still down
+        (7, 0, SunState.ABOVE, SubMode.SOLAR),      # post-sunrise
+        (14, 0, SunState.BELOW, SubMode.NIGHT),     # daytime but sun below (eclipse/weather)
+    ],
+)
+def test_pick_submode(hour: int, minute: int, sun: SunState, expected: SubMode) -> None:
+    now = datetime(2026, 5, 27, hour, minute, tzinfo=UTC)
+    result = pick_submode(
+        now=now,
+        sun_state=sun,
+        dinner_start=time(16, 0),
+        night_start=time(22, 0),
+    )
+    assert result is expected
