@@ -175,3 +175,38 @@ async def test_apply_none_makes_no_calls(hass: HomeAssistant) -> None:
         mock_call.assert_not_called()
     # last_desired_amps stays as before
     assert coord._last_desired_amps == 10
+
+
+@pytest.mark.asyncio
+async def test_gate_failure_resets_state(hass: HomeAssistant) -> None:
+    """When the gate fails (cable off), last_desired_amps must reset to None."""
+    hass.states.async_set("sensor.grid_import", "0")
+    hass.states.async_set("sensor.grid_export", "0")
+    hass.states.async_set("sensor.ev_consumption", "0")
+    hass.states.async_set("sensor.ev_soc", "60")
+    hass.states.async_set("binary_sensor.ev_cable", "off")  # cable disconnected
+    hass.states.async_set("device_tracker.ev", "home")
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    entry_data = {
+        CONF_GRID_IMPORT_SENSOR: "sensor.grid_import",
+        CONF_GRID_EXPORT_SENSOR: "sensor.grid_export",
+        CONF_EV_CONSUMPTION_SENSOR: "sensor.ev_consumption",
+        CONF_EV_SOC_SENSOR: "sensor.ev_soc",
+        CONF_EV_CABLE_SENSOR: "binary_sensor.ev_cable",
+        CONF_EV_LOCATION_TRACKER: "device_tracker.ev",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    coord._last_desired_amps = 10  # previously charging
+
+    # Stub user-control reads (those land in a later task)
+    coord._read_user_controls = lambda: (Mode.AUTO, True, 80.0, 80.0, time(16, 0), time(22, 0))
+
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
+    ):
+        result = await coord._async_update_data()
+
+    assert coord._last_desired_amps is None
+    assert result is not None
+    assert result.sub_mode is SubMode.DISABLED

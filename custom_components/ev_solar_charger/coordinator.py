@@ -11,7 +11,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .algorithm import Decision, Mode, Snapshot, SunState, WriteAction
+from .algorithm import (
+    Decision,
+    Mode,
+    Snapshot,
+    SubMode,
+    SunState,
+    WriteAction,
+    compute_decision,
+)
 from .const import (
     CONF_EV_CABLE_SENSOR,
     CONF_EV_CHARGE_CURRENT_NUMBER,
@@ -172,8 +180,32 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         self._last_desired_amps = decision.desired_amps
 
     async def _async_update_data(self) -> Decision | None:
-        """Per-tick: read snapshot, compute decision, apply.
+        """Periodic tick: build snapshot, compute decision, apply."""
+        mode, enabled, target_day, target_night, dinner_start, night_start = (
+            self._read_user_controls()
+        )
+        snapshot = await self._build_snapshot(
+            mode=mode,
+            enabled=enabled,
+            target_day_soc=target_day,
+            target_night_soc=target_night,
+            dinner_start=dinner_start,
+            night_start=night_start,
+        )
+        decision = compute_decision(snapshot)
 
-        Skeleton: returns None. Subsequent tasks fill this in.
+        # State reset on gate transitions: if the gate is closed (no-op),
+        # forget last_desired_amps so the next tick after re-open writes.
+        if decision.sub_mode is SubMode.DISABLED and decision.write_action is WriteAction.NONE:
+            self._last_desired_amps = None
+        else:
+            await self._apply_decision(decision)
+
+        return decision
+
+    def _read_user_controls(self) -> tuple[Mode, bool, float, float, time, time]:
+        """Read the integration's own user-facing helper entities.
+
+        Default fallback values; real implementation set up in __init__ task.
         """
-        return None
+        return (Mode.AUTO, True, 80.0, 80.0, time(16, 0), time(22, 0))
