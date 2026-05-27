@@ -237,8 +237,30 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         return None
 
     def _read_user_controls(self) -> tuple[Mode, bool, float, float, time, time]:
-        """Read the integration's own user-facing helper entities.
+        """Read the integration's own user-facing helper entities."""
+        mode_state = self.hass.states.get(f"select.{DOMAIN}_mode")
+        mode = Mode.AUTO
+        if mode_state is not None and mode_state.state in {m.value for m in Mode}:
+            mode = Mode(mode_state.state)
 
-        Default fallback values; real implementation set up in __init__ task.
-        """
-        return (Mode.AUTO, True, 80.0, 80.0, time(16, 0), time(22, 0))
+        enabled_state = self.hass.states.get(f"switch.{DOMAIN}_enabled")
+        enabled = True
+        if enabled_state is not None:
+            enabled = enabled_state.state == "on"
+
+        target_day = self._read_float(f"number.{DOMAIN}_target_day_soc") or 80.0
+        target_night = self._read_float(f"number.{DOMAIN}_target_night_soc") or 80.0
+
+        dinner = self._read_time(f"time.{DOMAIN}_dinner_start") or time(16, 0)
+        night = self._read_time(f"time.{DOMAIN}_night_start") or time(22, 0)
+        return mode, enabled, target_day, target_night, dinner, night
+
+    def _read_time(self, entity_id: str) -> time | None:
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        try:
+            h, m, *_ = state.state.split(":")
+            return time(int(h), int(m))
+        except (ValueError, IndexError):
+            return None
