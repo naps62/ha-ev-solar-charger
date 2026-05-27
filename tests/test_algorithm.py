@@ -68,15 +68,15 @@ def test_sun_state_enum_values() -> None:
 @pytest.mark.parametrize(
     ("hour", "minute", "sun", "expected"),
     [
-        (10, 0, SunState.ABOVE, SubMode.SOLAR),     # mid-morning, sun up
-        (15, 59, SunState.ABOVE, SubMode.SOLAR),    # just before dinner
-        (16, 0, SunState.ABOVE, SubMode.DINNER),    # boundary: dinner starts
-        (21, 59, SunState.ABOVE, SubMode.DINNER),   # just before night
-        (22, 0, SunState.ABOVE, SubMode.NIGHT),     # boundary: night starts
-        (23, 30, SunState.BELOW, SubMode.NIGHT),    # late night
-        (5, 30, SunState.BELOW, SubMode.NIGHT),     # pre-dawn, sun still down
-        (7, 0, SunState.ABOVE, SubMode.SOLAR),      # post-sunrise
-        (14, 0, SunState.BELOW, SubMode.NIGHT),     # daytime but sun below (eclipse/weather)
+        (10, 0, SunState.ABOVE, SubMode.SOLAR),  # mid-morning, sun up
+        (15, 59, SunState.ABOVE, SubMode.SOLAR),  # just before dinner
+        (16, 0, SunState.ABOVE, SubMode.DINNER),  # boundary: dinner starts
+        (21, 59, SunState.ABOVE, SubMode.DINNER),  # just before night
+        (22, 0, SunState.ABOVE, SubMode.NIGHT),  # boundary: night starts
+        (23, 30, SunState.BELOW, SubMode.NIGHT),  # late night
+        (5, 30, SunState.BELOW, SubMode.NIGHT),  # pre-dawn, sun still down
+        (7, 0, SunState.ABOVE, SubMode.SOLAR),  # post-sunrise
+        (14, 0, SunState.BELOW, SubMode.NIGHT),  # daytime but sun below (eclipse/weather)
     ],
 )
 def test_pick_submode(hour: int, minute: int, sun: SunState, expected: SubMode) -> None:
