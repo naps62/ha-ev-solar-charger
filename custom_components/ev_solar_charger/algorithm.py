@@ -101,6 +101,7 @@ MIN_AMPS = 5
 MAX_AMPS = 16
 VOLTAGE = 230
 DINNER_AMPS = 6
+MAX_PLAUSIBLE_EV_W = 20_000  # anything above this is sensor glitch
 
 
 def _write_action_for(desired: int, last: int | None) -> WriteAction:
@@ -185,8 +186,14 @@ def compute_decision(s: Snapshot) -> Decision:
             leftover_w=None,
         )
 
-    # Solar sub-mode: forward calculation from leftover
-    leftover_w = -s.net_grid_w + s.ev_consumption_w
+    # Solar sub-mode: forward calculation from leftover.
+    # Sanitize anomalous EV consumption (negative or impossibly large) before use.
+    if s.ev_consumption_w < 0 or s.ev_consumption_w > MAX_PLAUSIBLE_EV_W:
+        sanitized_ev_w = 0.0
+    else:
+        sanitized_ev_w = s.ev_consumption_w
+
+    leftover_w = -s.net_grid_w + sanitized_ev_w
     raw_amps = round(leftover_w / VOLTAGE)
 
     if s.ev_soc < s.target_day_soc:

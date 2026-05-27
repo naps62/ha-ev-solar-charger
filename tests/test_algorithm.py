@@ -343,3 +343,33 @@ def test_solar_clamps_to_max_amps(base_snapshot: Snapshot) -> None:
     )
     d = compute_decision(s)
     assert d.desired_amps == 16
+
+
+def test_negative_ev_consumption_treated_as_zero(base_snapshot: Snapshot) -> None:
+    """Negative EV consumption (bad sensor) should be ignored, not amplify leftover."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-2300.0,
+        ev_consumption_w=-500.0,  # nonsense
+        ev_soc=60.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    # leftover should be -(-2300) + 0 = 2300 (NOT 2800)
+    assert d.leftover_w == 2300.0
+    assert d.desired_amps == 10
+
+
+def test_implausible_ev_consumption_treated_as_zero(base_snapshot: Snapshot) -> None:
+    """EV consumption > 20kW (sensor glitch) ignored."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=0.0,
+        ev_consumption_w=50_000.0,  # impossible
+        ev_soc=60.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    # Treated as 0 → leftover = -0 + 0 = 0 → MIN_AMPS below target
+    assert d.leftover_w == 0.0
+    assert d.desired_amps == 5
