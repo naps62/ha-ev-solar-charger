@@ -1,0 +1,33 @@
+[project]
+name = "ev_solar_charger"
+version = "0.1.0"
+description = "Home Assistant integration: dynamic EV charging from solar surplus"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.13"
+
+[project.optional-dependencies]
+dev = [
+  "homeassistant>=2026.2.0",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-homeassistant-custom-component>=0.13",
+  "ruff>=0.5",
+  "mypy>=1.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
