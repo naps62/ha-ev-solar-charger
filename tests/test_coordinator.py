@@ -251,3 +251,61 @@ async def test_safety_fallback_on_stale_sensor(hass: HomeAssistant) -> None:
         )
     assert result is not None
     assert result.sub_mode is SubMode.SAFETY_FALLBACK
+
+
+@pytest.mark.asyncio
+async def test_mode_off_does_not_oscillate(hass: HomeAssistant) -> None:
+    """Mode.OFF steady-state must not flip last_desired_amps None ↔ 0.
+
+    Regression test for the gate-reset bug: when mode=OFF and EV is already at
+    0A, the algorithm returns (desired=0, write=NONE, sub_mode=DISABLED). If
+    the gate-reset condition incorrectly fires here, the next tick re-issues
+    switch.turn_off (because last_desired_amps was set to None, so
+    _write_action_for(0, None) → TURN_OFF). That produces a redundant write
+    every other tick.
+    """
+    hass.states.async_set("sensor.grid_import", "100")
+    hass.states.async_set("sensor.grid_export", "0")
+    hass.states.async_set("sensor.ev_consumption", "0")
+    hass.states.async_set("sensor.ev_soc", "60")
+    hass.states.async_set("binary_sensor.ev_cable", "on")
+    hass.states.async_set("device_tracker.ev", "home")
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    entry_data = {
+        CONF_GRID_IMPORT_SENSOR: "sensor.grid_import",
+        CONF_GRID_EXPORT_SENSOR: "sensor.grid_export",
+        CONF_EV_CONSUMPTION_SENSOR: "sensor.ev_consumption",
+        CONF_EV_SOC_SENSOR: "sensor.ev_soc",
+        CONF_EV_CABLE_SENSOR: "binary_sensor.ev_cable",
+        CONF_EV_LOCATION_TRACKER: "device_tracker.ev",
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    coord._last_desired_amps = 0  # EV already off
+
+    # Stub user controls: mode=OFF, enabled
+    coord._read_user_controls = lambda: (
+        Mode.OFF, True, 80.0, 80.0, time(16, 0), time(22, 0)
+    )
+
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call",
+        new_callable=AsyncMock,
+    ) as mock_call:
+        # First tick: decision should be (desired=0, write=NONE) — no calls
+        result1 = await coord._async_update_data()
+        assert result1 is not None
+        assert result1.desired_amps == 0
+        assert result1.write_action is WriteAction.NONE
+        # State must NOT reset — Mode.OFF is not a gate closure
+        assert coord._last_desired_amps == 0
+
+        # Second tick: same. Still no calls.
+        result2 = await coord._async_update_data()
+        assert result2.write_action is WriteAction.NONE
+        assert coord._last_desired_amps == 0
+
+        # No service calls made across both ticks
+        mock_call.assert_not_called()

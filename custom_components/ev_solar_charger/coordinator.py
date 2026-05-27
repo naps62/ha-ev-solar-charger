@@ -15,7 +15,6 @@ from .algorithm import (
     Decision,
     Mode,
     Snapshot,
-    SubMode,
     SunState,
     WriteAction,
     compute_decision,
@@ -218,7 +217,9 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
 
         # State reset on gate transitions: if the gate is closed (no-op),
         # forget last_desired_amps so the next tick after re-open writes.
-        if decision.sub_mode is SubMode.DISABLED and decision.write_action is WriteAction.NONE:
+        # Use desired_amps is None as the discriminator — true gate closure
+        # (cable off, not home, disabled) returns None; Mode.OFF returns 0.
+        if decision.desired_amps is None:  # true gate closure (cable off, not home, disabled)
             self._last_desired_amps = None
         else:
             await self._apply_decision(decision)
