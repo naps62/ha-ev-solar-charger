@@ -13,6 +13,12 @@ from custom_components.ev_solar_charger.algorithm import (
 )
 
 
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Enable custom integrations for all tests."""
+    yield
+
+
 @pytest.fixture
 def base_snapshot() -> Snapshot:
     """Return a baseline snapshot used as the starting point for tests.

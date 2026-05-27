@@ -1,0 +1,29 @@
+{
+  "title": "EV Solar Charger",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select sensors",
+        "data": {
+          "grid_import_sensor": "Grid import power sensor",
+          "grid_export_sensor": "Grid export power sensor",
+          "net_grid_sensor": "Net grid power sensor (signed)",
+          "ev_consumption_sensor": "EV consumption power sensor",
+          "ev_charge_current_number": "EV charge current (number entity)",
+          "ev_charge_switch": "EV charge switch",
+          "ev_cable_sensor": "EV cable connected (binary sensor)",
+          "ev_soc_sensor": "EV battery SOC sensor",
+          "ev_location_tracker": "EV location (device_tracker)",
+          "ev_home_zone": "Home zone state",
+          "solar_production_sensor": "Solar production sensor (optional)"
+        }
+      }
+    },
+    "error": {
+      "missing_grid_signal": "Either net_grid_sensor OR (grid_import_sensor + grid_export_sensor) is required.",
+      "mutual_exclusivity_failed": "grid_import and grid_export are both > 0; one of them is likely wired backwards.",
+      "negative_solar": "Solar production sensor reports a persistent negative value; check clamp direction.",
+      "ev_draw_implausible": "EV consumption doesn't match the expected draw for the set charge current."
+    }
+  }
+}
