@@ -351,4 +351,4 @@ async def test_service_call_failure_does_not_crash_tick(hass: HomeAssistant) -> 
     assert result is not None
     assert result.sub_mode is SubMode.FORCE_MAX
     # Service-call failure is logged, not propagated; coordinator still records intent
-    assert coord._last_desired_amps == 16
+    assert coord._last_desired_amps == 14

@@ -98,7 +98,7 @@ def pick_submode(
 # Defaults used internally; the coordinator passes config-driven values via Snapshot
 # extensions in a later task. For v0.1 these are constants.
 MIN_AMPS = 5
-MAX_AMPS = 16
+MAX_AMPS = 14
 VOLTAGE = 230
 DINNER_AMPS = 6
 MAX_PLAUSIBLE_EV_W = 20_000  # anything above this is sensor glitch

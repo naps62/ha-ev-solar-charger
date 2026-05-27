@@ -137,14 +137,14 @@ def test_force_min(base_snapshot: Snapshot) -> None:
 def test_force_max_from_off(base_snapshot: Snapshot) -> None:
     s = dataclasses.replace(base_snapshot, mode=Mode.FORCE_MAX, last_desired_amps=0)
     d = compute_decision(s)
-    assert d.desired_amps == 16
+    assert d.desired_amps == 14
     assert d.write_action is WriteAction.TURN_ON_AND_SET
 
 
 def test_force_max_from_charging(base_snapshot: Snapshot) -> None:
     s = dataclasses.replace(base_snapshot, mode=Mode.FORCE_MAX, last_desired_amps=10)
     d = compute_decision(s)
-    assert d.desired_amps == 16
+    assert d.desired_amps == 14
     assert d.write_action is WriteAction.SET_AMPS
 
 
@@ -198,7 +198,7 @@ def test_night_below_target_charges_at_max(base_snapshot: Snapshot) -> None:
         last_desired_amps=None,
     )
     d = compute_decision(s)
-    assert d.desired_amps == 16
+    assert d.desired_amps == 14
     assert d.sub_mode is SubMode.NIGHT
     assert d.write_action is WriteAction.TURN_ON_AND_SET
 
@@ -210,7 +210,7 @@ def test_night_at_target_stops(base_snapshot: Snapshot) -> None:
         now=datetime(2026, 5, 27, 23, 0, tzinfo=UTC),
         ev_soc=80.0,
         target_night_soc=80.0,
-        last_desired_amps=16,
+        last_desired_amps=14,
     )
     d = compute_decision(s)
     assert d.desired_amps == 0
@@ -343,7 +343,7 @@ def test_solar_clamps_to_max_amps(base_snapshot: Snapshot) -> None:
         target_day_soc=80.0,
     )
     d = compute_decision(s)
-    assert d.desired_amps == 16
+    assert d.desired_amps == 14
 
 
 def test_negative_ev_consumption_treated_as_zero(base_snapshot: Snapshot) -> None:
