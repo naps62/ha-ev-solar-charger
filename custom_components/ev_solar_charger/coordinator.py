@@ -11,9 +11,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .algorithm import Decision, Mode, Snapshot, SunState
+from .algorithm import Decision, Mode, Snapshot, SunState, WriteAction
 from .const import (
     CONF_EV_CABLE_SENSOR,
+    CONF_EV_CHARGE_CURRENT_NUMBER,
+    CONF_EV_CHARGE_SWITCH,
     CONF_EV_CONSUMPTION_SENSOR,
     CONF_EV_HOME_ZONE,
     CONF_EV_LOCATION_TRACKER,
@@ -122,6 +124,52 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             night_start=night_start,
             last_desired_amps=self._last_desired_amps,
         )
+
+    async def _apply_decision(self, decision: Decision) -> None:
+        """Execute the decision's WriteAction against HA."""
+        number_eid = self.entry_data.get(CONF_EV_CHARGE_CURRENT_NUMBER)
+        switch_eid = self.entry_data.get(CONF_EV_CHARGE_SWITCH)
+
+        if decision.write_action is WriteAction.NONE:
+            return
+
+        if decision.write_action is WriteAction.TURN_OFF and switch_eid:
+            await self.hass.services.async_call(
+                "switch",
+                "turn_off",
+                {"entity_id": switch_eid},
+                blocking=True,
+            )
+
+        elif decision.write_action is WriteAction.TURN_ON_AND_SET:
+            if switch_eid:
+                await self.hass.services.async_call(
+                    "switch",
+                    "turn_on",
+                    {"entity_id": switch_eid},
+                    blocking=True,
+                )
+            if number_eid and decision.desired_amps is not None:
+                await self.hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": number_eid, "value": decision.desired_amps},
+                    blocking=True,
+                )
+
+        elif (
+            decision.write_action is WriteAction.SET_AMPS
+            and number_eid
+            and decision.desired_amps is not None
+        ):
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": number_eid, "value": decision.desired_amps},
+                blocking=True,
+            )
+
+        self._last_desired_amps = decision.desired_amps
 
     async def _async_update_data(self) -> Decision | None:
         """Per-tick: read snapshot, compute decision, apply.

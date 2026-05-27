@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 from datetime import time
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.ev_solar_charger.algorithm import Mode, SunState
+from custom_components.ev_solar_charger.algorithm import (
+    Decision,
+    Mode,
+    SubMode,
+    SunState,
+    WriteAction,
+)
 from custom_components.ev_solar_charger.const import (
     CONF_EV_CABLE_SENSOR,
+    CONF_EV_CHARGE_CURRENT_NUMBER,
+    CONF_EV_CHARGE_SWITCH,
     CONF_EV_CONSUMPTION_SENSOR,
     CONF_EV_LOCATION_TRACKER,
     CONF_EV_SOC_SENSOR,
@@ -65,3 +74,104 @@ async def test_coordinator_reads_snapshot(hass: HomeAssistant) -> None:
     assert snapshot.cable_connected is True
     assert snapshot.at_home is True
     assert snapshot.sun_state is SunState.ABOVE
+
+
+@pytest.mark.asyncio
+async def test_apply_set_amps(hass: HomeAssistant) -> None:
+    entry_data = {
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
+    ) as mock_call:
+        decision = Decision(
+            desired_amps=10,
+            write_action=WriteAction.SET_AMPS,
+            sub_mode=SubMode.SOLAR,
+            reason="solar",
+            leftover_w=2300.0,
+        )
+        await coord._apply_decision(decision)
+        mock_call.assert_called_once_with(
+            "number",
+            "set_value",
+            {"entity_id": "number.ev_charge_current", "value": 10},
+            blocking=True,
+        )
+    assert coord._last_desired_amps == 10
+
+
+@pytest.mark.asyncio
+async def test_apply_turn_off(hass: HomeAssistant) -> None:
+    entry_data = {
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    coord._last_desired_amps = 10
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
+    ) as mock_call:
+        decision = Decision(
+            desired_amps=0,
+            write_action=WriteAction.TURN_OFF,
+            sub_mode=SubMode.NIGHT,
+            reason="at target",
+            leftover_w=None,
+        )
+        await coord._apply_decision(decision)
+        mock_call.assert_called_once_with(
+            "switch",
+            "turn_off",
+            {"entity_id": "switch.ev_charge"},
+            blocking=True,
+        )
+    assert coord._last_desired_amps == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_turn_on_and_set(hass: HomeAssistant) -> None:
+    entry_data = {
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
+    ) as mock_call:
+        decision = Decision(
+            desired_amps=10,
+            write_action=WriteAction.TURN_ON_AND_SET,
+            sub_mode=SubMode.SOLAR,
+            reason="cable just plugged",
+            leftover_w=2300.0,
+        )
+        await coord._apply_decision(decision)
+        assert mock_call.call_count == 2
+        # first call: switch.turn_on
+        assert mock_call.call_args_list[0].args[:2] == ("switch", "turn_on")
+        # second call: number.set_value
+        assert mock_call.call_args_list[1].args[:2] == ("number", "set_value")
+    assert coord._last_desired_amps == 10
+
+
+@pytest.mark.asyncio
+async def test_apply_none_makes_no_calls(hass: HomeAssistant) -> None:
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data={}, options={})
+    coord._last_desired_amps = 10
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
+    ) as mock_call:
+        decision = Decision(
+            desired_amps=10,
+            write_action=WriteAction.NONE,
+            sub_mode=SubMode.SOLAR,
+            reason="no change",
+            leftover_w=2300.0,
+        )
+        await coord._apply_decision(decision)
+        mock_call.assert_not_called()
+    # last_desired_amps stays as before
+    assert coord._last_desired_amps == 10
