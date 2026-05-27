@@ -16,6 +16,7 @@ from custom_components.ev_solar_charger.algorithm import (
     WriteAction,
     compute_decision,
     pick_submode,
+    safety_fallback_decision,
 )
 
 
@@ -373,3 +374,21 @@ def test_implausible_ev_consumption_treated_as_zero(base_snapshot: Snapshot) -> 
     # Treated as 0 → leftover = -0 + 0 = 0 → MIN_AMPS below target
     assert d.leftover_w == 0.0
     assert d.desired_amps == 5
+
+
+def test_safety_fallback_decision() -> None:
+    d = safety_fallback_decision(reason="grid_export sensor stale 6 min", last_desired_amps=10)
+    assert d.desired_amps == 6
+    assert d.sub_mode is SubMode.SAFETY_FALLBACK
+    assert d.write_action is WriteAction.SET_AMPS
+    assert "stale" in d.reason
+
+
+def test_safety_fallback_decision_no_change() -> None:
+    d = safety_fallback_decision(reason="sensor", last_desired_amps=6)
+    assert d.write_action is WriteAction.NONE
+
+
+def test_safety_fallback_decision_from_off() -> None:
+    d = safety_fallback_decision(reason="sensor", last_desired_amps=0)
+    assert d.write_action is WriteAction.TURN_ON_AND_SET

@@ -218,3 +218,18 @@ def compute_decision(s: Snapshot) -> Decision:
         ),
         leftover_w=leftover_w,
     )
+
+
+SAFETY_FALLBACK_AMPS = 6
+
+
+def safety_fallback_decision(reason: str, last_desired_amps: int | None) -> Decision:
+    """Build a Decision that forces the EV to a safe rate when inputs are unreliable."""
+    desired = SAFETY_FALLBACK_AMPS
+    return Decision(
+        desired_amps=desired,
+        write_action=_write_action_for(desired, last_desired_amps),
+        sub_mode=SubMode.SAFETY_FALLBACK,
+        reason=f"safety-fallback: {reason}",
+        leftover_w=None,
+    )
