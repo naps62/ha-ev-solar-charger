@@ -185,5 +185,29 @@ def compute_decision(s: Snapshot) -> Decision:
             leftover_w=None,
         )
 
-    # Solar sub-mode in the next task.
-    raise NotImplementedError("solar sub-mode not yet implemented")
+    # Solar sub-mode: forward calculation from leftover
+    leftover_w = -s.net_grid_w + s.ev_consumption_w
+    raw_amps = round(leftover_w / VOLTAGE)
+
+    if s.ev_soc < s.target_day_soc:
+        desired = max(MIN_AMPS, raw_amps)
+    else:
+        desired = max(0, raw_amps)
+
+    # Clamp to circuit max
+    desired = min(MAX_AMPS, desired)
+
+    # Snap sub-MIN positive values: MIN if below target, else 0
+    if 0 < desired < MIN_AMPS:
+        desired = MIN_AMPS if s.ev_soc < s.target_day_soc else 0
+
+    return Decision(
+        desired_amps=desired,
+        write_action=_write_action_for(desired, s.last_desired_amps),
+        sub_mode=SubMode.SOLAR,
+        reason=(
+            f"solar: leftover={leftover_w:+.0f}W → {desired}A "
+            f"(soc {s.ev_soc:.0f}, target {s.target_day_soc:.0f})"
+        ),
+        leftover_w=leftover_w,
+    )

@@ -230,3 +230,116 @@ def test_night_above_target_stays_off(base_snapshot: Snapshot) -> None:
     d = compute_decision(s)
     assert d.desired_amps == 0
     assert d.write_action is WriteAction.NONE
+
+
+def test_solar_below_target_positive_leftover_uses_amps(base_snapshot: Snapshot) -> None:
+    """Exporting 2300W and EV idle → leftover 2300W → 10A."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-2300.0,
+        ev_consumption_w=0.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+        last_desired_amps=None,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 10  # 2300 / 230 = 10
+    assert d.sub_mode is SubMode.SOLAR
+    assert d.leftover_w == 2300.0
+
+
+def test_solar_below_target_negative_leftover_floors_at_min(base_snapshot: Snapshot) -> None:
+    """Importing → leftover negative → still charge at MIN below target."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=500.0,  # importing
+        ev_consumption_w=0.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+        last_desired_amps=None,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 5  # MIN_AMPS
+    assert d.sub_mode is SubMode.SOLAR
+
+
+def test_solar_below_target_sub_min_leftover_floors_at_min(base_snapshot: Snapshot) -> None:
+    """Leftover positive but < MIN_AMPS worth → floor at MIN."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-500.0,
+        ev_consumption_w=0.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 5
+
+
+def test_solar_at_target_positive_leftover(base_snapshot: Snapshot) -> None:
+    """At target, follow leftover (no floor)."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-2300.0,
+        ev_consumption_w=0.0,
+        ev_soc=80.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 10
+
+
+def test_solar_at_target_zero_leftover_stops(base_snapshot: Snapshot) -> None:
+    """At target, no surplus → 0A (solar-only)."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=0.0,
+        ev_consumption_w=0.0,
+        ev_soc=80.0,
+        target_day_soc=80.0,
+        last_desired_amps=5,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+    assert d.write_action is WriteAction.TURN_OFF
+
+
+def test_solar_at_target_sub_min_leftover_stops(base_snapshot: Snapshot) -> None:
+    """At target, leftover < MIN worth → 0 (not MIN)."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-500.0,  # leftover ~ 500W → 2A
+        ev_consumption_w=0.0,
+        ev_soc=80.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+
+
+def test_solar_leftover_includes_current_ev_draw(base_snapshot: Snapshot) -> None:
+    """leftover_w = -net_grid + ev_consumption. EV pulling 2300W, net_grid 0 → leftover 2300."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=0.0,
+        ev_consumption_w=2300.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+        last_desired_amps=10,
+    )
+    d = compute_decision(s)
+    assert d.leftover_w == 2300.0
+    assert d.desired_amps == 10  # no change
+
+
+def test_solar_clamps_to_max_amps(base_snapshot: Snapshot) -> None:
+    """Huge solar surplus shouldn't push amps past MAX."""
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-8000.0,  # 8000W surplus → 35A unclamped
+        ev_consumption_w=0.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 16
