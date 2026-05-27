@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import time, timedelta
 from typing import Any
 
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
-from .algorithm import Decision
-from .const import DEFAULT_TICK_SECONDS, DOMAIN
+from .algorithm import Decision, Mode, Snapshot, SunState
+from .const import (
+    CONF_EV_CABLE_SENSOR,
+    CONF_EV_CONSUMPTION_SENSOR,
+    CONF_EV_HOME_ZONE,
+    CONF_EV_LOCATION_TRACKER,
+    CONF_EV_SOC_SENSOR,
+    CONF_GRID_EXPORT_SENSOR,
+    CONF_GRID_IMPORT_SENSOR,
+    CONF_NET_GRID_SENSOR,
+    DEFAULT_TICK_SECONDS,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +45,82 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             logger=_LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=DEFAULT_TICK_SECONDS),
+        )
+
+    def _read_float(self, entity_id: str | None) -> float | None:
+        """Read a float from a sensor; return None if unavailable/unknown/missing."""
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return None
+
+    def _read_bool(self, entity_id: str | None, on_state: str = "on") -> bool | None:
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        return state.state == on_state
+
+    def _read_at_home(self) -> bool | None:
+        tracker = self.entry_data.get(CONF_EV_LOCATION_TRACKER)
+        if not tracker:
+            return None
+        state = self.hass.states.get(tracker)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        home_zone: str = self.entry_data.get(CONF_EV_HOME_ZONE, "home")
+        return state.state == home_zone
+
+    def _read_sun_state(self) -> SunState:
+        state = self.hass.states.get("sun.sun")
+        if state is None or state.state != "above_horizon":
+            return SunState.BELOW
+        return SunState.ABOVE
+
+    def _read_net_grid(self) -> float | None:
+        """Return signed net grid power: + import, - export."""
+        net = self._read_float(self.entry_data.get(CONF_NET_GRID_SENSOR))
+        if net is not None:
+            return net
+        imp = self._read_float(self.entry_data.get(CONF_GRID_IMPORT_SENSOR))
+        exp = self._read_float(self.entry_data.get(CONF_GRID_EXPORT_SENSOR))
+        if imp is None or exp is None:
+            return None
+        return imp - exp
+
+    async def _build_snapshot(
+        self,
+        *,
+        mode: Mode,
+        enabled: bool,
+        target_day_soc: float,
+        target_night_soc: float,
+        dinner_start: time,
+        night_start: time,
+    ) -> Snapshot:
+        return Snapshot(
+            now=dt_util.now(),
+            sun_state=self._read_sun_state(),
+            net_grid_w=self._read_net_grid() or 0.0,
+            ev_consumption_w=self._read_float(
+                self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR)
+            ) or 0.0,
+            ev_soc=self._read_float(self.entry_data.get(CONF_EV_SOC_SENSOR)) or 0.0,
+            cable_connected=self._read_bool(self.entry_data.get(CONF_EV_CABLE_SENSOR)) or False,
+            at_home=self._read_at_home() or False,
+            enabled=enabled,
+            mode=mode,
+            target_day_soc=target_day_soc,
+            target_night_soc=target_night_soc,
+            dinner_start=dinner_start,
+            night_start=night_start,
+            last_desired_amps=self._last_desired_amps,
         )
 
     async def _async_update_data(self) -> Decision | None:
