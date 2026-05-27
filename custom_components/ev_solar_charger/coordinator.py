@@ -134,8 +134,43 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             last_desired_amps=self._last_desired_amps,
         )
 
+    async def _safe_service_call(
+        self,
+        domain: str,
+        service: str,
+        entity_id: str,
+        data: dict[str, object] | None = None,
+    ) -> bool:
+        """Call a service, returning False (and logging) on failure instead of raising.
+
+        Service-call failures (e.g. EV API rejecting a redundant turn_on) must
+        not propagate up to the coordinator — they would mark the whole tick
+        as failed and the integration as setup_retry. We keep going and let
+        the next tick (or the user) reconcile.
+        """
+        call_data: dict[str, object] = {"entity_id": entity_id}
+        if data:
+            call_data.update(data)
+        try:
+            await self.hass.services.async_call(domain, service, call_data, blocking=True)
+            return True
+        except Exception as err:
+            _LOGGER.warning(
+                "EV Solar Charger: %s.%s on %s failed: %s",
+                domain,
+                service,
+                entity_id,
+                err,
+            )
+            return False
+
     async def _apply_decision(self, decision: Decision) -> None:
-        """Execute the decision's WriteAction against HA."""
+        """Execute the decision's WriteAction against HA.
+
+        Service-call failures are logged but never raised — see _safe_service_call.
+        We still update _last_desired_amps to reflect intent; if the actuator
+        rejected the write, the next tick will retry naturally.
+        """
         number_eid = self.entry_data.get(CONF_EV_CHARGE_CURRENT_NUMBER)
         switch_eid = self.entry_data.get(CONF_EV_CHARGE_SWITCH)
 
@@ -143,27 +178,17 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             return
 
         if decision.write_action is WriteAction.TURN_OFF and switch_eid:
-            await self.hass.services.async_call(
-                "switch",
-                "turn_off",
-                {"entity_id": switch_eid},
-                blocking=True,
-            )
+            await self._safe_service_call("switch", "turn_off", switch_eid)
 
         elif decision.write_action is WriteAction.TURN_ON_AND_SET:
             if switch_eid:
-                await self.hass.services.async_call(
-                    "switch",
-                    "turn_on",
-                    {"entity_id": switch_eid},
-                    blocking=True,
-                )
+                await self._safe_service_call("switch", "turn_on", switch_eid)
             if number_eid and decision.desired_amps is not None:
-                await self.hass.services.async_call(
+                await self._safe_service_call(
                     "number",
                     "set_value",
-                    {"entity_id": number_eid, "value": decision.desired_amps},
-                    blocking=True,
+                    number_eid,
+                    data={"value": decision.desired_amps},
                 )
 
         elif (
@@ -171,11 +196,11 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             and number_eid
             and decision.desired_amps is not None
         ):
-            await self.hass.services.async_call(
+            await self._safe_service_call(
                 "number",
                 "set_value",
-                {"entity_id": number_eid, "value": decision.desired_amps},
-                blocking=True,
+                number_eid,
+                data={"value": decision.desired_amps},
             )
 
         self._last_desired_amps = decision.desired_amps

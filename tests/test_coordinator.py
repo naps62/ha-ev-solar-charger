@@ -309,3 +309,46 @@ async def test_mode_off_does_not_oscillate(hass: HomeAssistant) -> None:
 
         # No service calls made across both ticks
         mock_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_service_call_failure_does_not_crash_tick(hass: HomeAssistant) -> None:
+    """If the EV's service call raises (e.g. Tesla rejects redundant turn_on),
+    the coordinator must log and continue — not propagate the exception, which
+    would put the integration into setup_retry forever.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    hass.states.async_set("sensor.grid_import", "0")
+    hass.states.async_set("sensor.grid_export", "0")
+    hass.states.async_set("sensor.ev_consumption", "0")
+    hass.states.async_set("sensor.ev_soc", "60")
+    hass.states.async_set("binary_sensor.ev_cable", "on")
+    hass.states.async_set("device_tracker.ev", "home")
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    entry_data = {
+        CONF_GRID_IMPORT_SENSOR: "sensor.grid_import",
+        CONF_GRID_EXPORT_SENSOR: "sensor.grid_export",
+        CONF_EV_CONSUMPTION_SENSOR: "sensor.ev_consumption",
+        CONF_EV_SOC_SENSOR: "sensor.ev_soc",
+        CONF_EV_CABLE_SENSOR: "binary_sensor.ev_cable",
+        CONF_EV_LOCATION_TRACKER: "device_tracker.ev",
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    coord._read_user_controls = lambda: (
+        Mode.FORCE_MAX, True, 80.0, 80.0, time(16, 0), time(22, 0)
+    )
+
+    failing_call = AsyncMock(
+        side_effect=HomeAssistantError("Command was unsuccessful: is_charging")
+    )
+    with patch("homeassistant.core.ServiceRegistry.async_call", failing_call):
+        # Must NOT raise
+        result = await coord._async_update_data()
+    assert result is not None
+    assert result.sub_mode is SubMode.FORCE_MAX
+    # Service-call failure is logged, not propagated; coordinator still records intent
+    assert coord._last_desired_amps == 16
