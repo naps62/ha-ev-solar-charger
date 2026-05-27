@@ -93,3 +93,71 @@ def pick_submode(
     if sun_state is SunState.ABOVE and h < dinner_start:
         return SubMode.SOLAR
     return SubMode.NIGHT
+
+
+# Defaults used internally; the coordinator passes config-driven values via Snapshot
+# extensions in a later task. For v0.1 these are constants.
+MIN_AMPS = 5
+MAX_AMPS = 16
+VOLTAGE = 230
+DINNER_AMPS = 6
+
+
+def _write_action_for(desired: int, last: int | None) -> WriteAction:
+    """Decide which service call to make based on the change."""
+    if last == desired:
+        return WriteAction.NONE
+    if desired == 0:
+        return WriteAction.TURN_OFF
+    if last in (0, None):
+        return WriteAction.TURN_ON_AND_SET
+    return WriteAction.SET_AMPS
+
+
+def compute_decision(s: Snapshot) -> Decision:
+    """Pure decision function: Snapshot -> Decision."""
+    # Gate: if we shouldn't be doing anything, return no-op.
+    if not s.enabled or not s.cable_connected or not s.at_home:
+        reason_bits = []
+        if not s.enabled:
+            reason_bits.append("disabled")
+        if not s.cable_connected:
+            reason_bits.append("cable off")
+        if not s.at_home:
+            reason_bits.append("not home")
+        return Decision(
+            desired_amps=None,
+            write_action=WriteAction.NONE,
+            sub_mode=SubMode.DISABLED,
+            reason=", ".join(reason_bits),
+            leftover_w=None,
+        )
+
+    # User force-mode overrides
+    if s.mode is Mode.OFF:
+        return Decision(
+            desired_amps=0,
+            write_action=_write_action_for(0, s.last_desired_amps),
+            sub_mode=SubMode.DISABLED,
+            reason="mode=off",
+            leftover_w=None,
+        )
+    if s.mode is Mode.FORCE_MIN:
+        return Decision(
+            desired_amps=MIN_AMPS,
+            write_action=_write_action_for(MIN_AMPS, s.last_desired_amps),
+            sub_mode=SubMode.FORCE_MIN,
+            reason=f"force-min: {MIN_AMPS}A",
+            leftover_w=None,
+        )
+    if s.mode is Mode.FORCE_MAX:
+        return Decision(
+            desired_amps=MAX_AMPS,
+            write_action=_write_action_for(MAX_AMPS, s.last_desired_amps),
+            sub_mode=SubMode.FORCE_MAX,
+            reason=f"force-max: {MAX_AMPS}A",
+            leftover_w=None,
+        )
+
+    # Auto mode is handled in subsequent tasks.
+    raise NotImplementedError("auto mode not yet implemented")

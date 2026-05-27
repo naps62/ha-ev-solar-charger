@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, time
 
 import pytest
@@ -13,14 +14,13 @@ from custom_components.ev_solar_charger.algorithm import (
     SubMode,
     SunState,
     WriteAction,
+    compute_decision,
     pick_submode,
 )
 
 
 def test_snapshot_is_frozen_dataclass(base_snapshot: Snapshot) -> None:
     """Snapshot should be immutable so the algorithm can't accidentally mutate inputs."""
-    import dataclasses
-
     assert dataclasses.is_dataclass(base_snapshot)
     assert base_snapshot.__dataclass_params__.frozen is True
 
@@ -87,3 +87,61 @@ def test_pick_submode(hour: int, minute: int, sun: SunState, expected: SubMode) 
         night_start=time(22, 0),
     )
     assert result is expected
+
+
+def test_disabled_returns_no_op(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, enabled=False)
+    d = compute_decision(s)
+    assert d.write_action is WriteAction.NONE
+    assert d.sub_mode is SubMode.DISABLED
+    assert d.desired_amps is None
+
+
+def test_cable_off_returns_no_op(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, cable_connected=False)
+    d = compute_decision(s)
+    assert d.write_action is WriteAction.NONE
+    assert d.sub_mode is SubMode.DISABLED
+
+
+def test_not_at_home_returns_no_op(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, at_home=False)
+    d = compute_decision(s)
+    assert d.write_action is WriteAction.NONE
+    assert d.sub_mode is SubMode.DISABLED
+
+
+def test_mode_off_turns_off(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, mode=Mode.OFF, last_desired_amps=10)
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+    assert d.write_action is WriteAction.TURN_OFF
+
+
+def test_mode_off_no_write_if_already_off(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, mode=Mode.OFF, last_desired_amps=0)
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+    assert d.write_action is WriteAction.NONE
+
+
+def test_force_min(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, mode=Mode.FORCE_MIN, last_desired_amps=None)
+    d = compute_decision(s)
+    assert d.desired_amps == 5
+    assert d.sub_mode is SubMode.FORCE_MIN
+    assert d.write_action is WriteAction.TURN_ON_AND_SET  # last was None == off
+
+
+def test_force_max_from_off(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, mode=Mode.FORCE_MAX, last_desired_amps=0)
+    d = compute_decision(s)
+    assert d.desired_amps == 16
+    assert d.write_action is WriteAction.TURN_ON_AND_SET
+
+
+def test_force_max_from_charging(base_snapshot: Snapshot) -> None:
+    s = dataclasses.replace(base_snapshot, mode=Mode.FORCE_MAX, last_desired_amps=10)
+    d = compute_decision(s)
+    assert d.desired_amps == 16
+    assert d.write_action is WriteAction.SET_AMPS
