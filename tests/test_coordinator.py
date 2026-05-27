@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import time
+from datetime import timedelta as _td
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.ev_solar_charger.algorithm import (
     Decision,
@@ -202,11 +204,50 @@ async def test_gate_failure_resets_state(hass: HomeAssistant) -> None:
     # Stub user-control reads (those land in a later task)
     coord._read_user_controls = lambda: (Mode.AUTO, True, 80.0, 80.0, time(16, 0), time(22, 0))
 
-    with patch(
-        "homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock
-    ):
+    with patch("homeassistant.core.ServiceRegistry.async_call", new_callable=AsyncMock):
         result = await coord._async_update_data()
 
     assert coord._last_desired_amps is None
     assert result is not None
     assert result.sub_mode is SubMode.DISABLED
+
+
+@pytest.mark.asyncio
+async def test_safety_fallback_on_stale_sensor(hass: HomeAssistant) -> None:
+    """If a required sensor has been unavailable for >5 min, force 6A."""
+    # Grid import is missing (unavailable for > threshold)
+    hass.states.async_set("sensor.grid_import", "unavailable")
+    hass.states.async_set("sensor.grid_export", "0")
+    hass.states.async_set("sensor.ev_consumption", "0")
+    hass.states.async_set("sensor.ev_soc", "60")
+    hass.states.async_set("binary_sensor.ev_cable", "on")
+    hass.states.async_set("device_tracker.ev", "home")
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    entry_data = {
+        CONF_GRID_IMPORT_SENSOR: "sensor.grid_import",
+        CONF_GRID_EXPORT_SENSOR: "sensor.grid_export",
+        CONF_EV_CONSUMPTION_SENSOR: "sensor.ev_consumption",
+        CONF_EV_SOC_SENSOR: "sensor.ev_soc",
+        CONF_EV_CABLE_SENSOR: "binary_sensor.ev_cable",
+        CONF_EV_LOCATION_TRACKER: "device_tracker.ev",
+        CONF_EV_CHARGE_CURRENT_NUMBER: "number.ev_charge_current",
+        CONF_EV_CHARGE_SWITCH: "switch.ev_charge",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+
+    # Simulate the sensor having been bad for longer than the threshold
+    coord._first_bad_sensor_ts = dt_util.now() - _td(seconds=400)
+
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call",
+        new_callable=AsyncMock,
+    ) as mock_call:
+        result = await coord._async_update_data()
+        # Should have written 6A
+        assert any(
+            call.args[:2] == ("number", "set_value") and call.args[2]["value"] == 6
+            for call in mock_call.call_args_list
+        )
+    assert result is not None
+    assert result.sub_mode is SubMode.SAFETY_FALLBACK

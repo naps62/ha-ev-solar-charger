@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -19,6 +19,7 @@ from .algorithm import (
     SunState,
     WriteAction,
     compute_decision,
+    safety_fallback_decision,
 )
 from .const import (
     CONF_EV_CABLE_SENSOR,
@@ -33,6 +34,7 @@ from .const import (
     CONF_NET_GRID_SENSOR,
     DEFAULT_TICK_SECONDS,
     DOMAIN,
+    STALE_SENSOR_THRESHOLD_SECONDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         self.entry_data = entry_data
         self.options = options
         self._last_desired_amps: int | None = None
+        self._first_bad_sensor_ts: datetime | None = None
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -118,9 +121,8 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             now=dt_util.now(),
             sun_state=self._read_sun_state(),
             net_grid_w=self._read_net_grid() or 0.0,
-            ev_consumption_w=self._read_float(
-                self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR)
-            ) or 0.0,
+            ev_consumption_w=self._read_float(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR))
+            or 0.0,
             ev_soc=self._read_float(self.entry_data.get(CONF_EV_SOC_SENSOR)) or 0.0,
             cable_connected=self._read_bool(self.entry_data.get(CONF_EV_CABLE_SENSOR)) or False,
             at_home=self._read_at_home() or False,
@@ -184,6 +186,26 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         mode, enabled, target_day, target_night, dinner_start, night_start = (
             self._read_user_controls()
         )
+
+        # Check for required-sensor freshness
+        bad_sensor_reason = self._check_required_sensors()
+        now = dt_util.now()
+        if bad_sensor_reason:
+            if self._first_bad_sensor_ts is None:
+                self._first_bad_sensor_ts = now
+            elapsed = (now - self._first_bad_sensor_ts).total_seconds()
+            if elapsed >= STALE_SENSOR_THRESHOLD_SECONDS:
+                decision = safety_fallback_decision(
+                    reason=bad_sensor_reason,
+                    last_desired_amps=self._last_desired_amps,
+                )
+                await self._apply_decision(decision)
+                return decision
+            # Hold last-known good for now
+            return None
+        else:
+            self._first_bad_sensor_ts = None
+
         snapshot = await self._build_snapshot(
             mode=mode,
             enabled=enabled,
@@ -202,6 +224,17 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             await self._apply_decision(decision)
 
         return decision
+
+    def _check_required_sensors(self) -> str | None:
+        """Return a human-readable reason if any required sensor is bad, else None."""
+        net = self._read_net_grid()
+        if net is None:
+            return "grid sensor(s) unavailable"
+        if self._read_float(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR)) is None:
+            return "ev consumption sensor unavailable"
+        if self._read_float(self.entry_data.get(CONF_EV_SOC_SENSOR)) is None:
+            return "ev soc sensor unavailable"
+        return None
 
     def _read_user_controls(self) -> tuple[Mode, bool, float, float, time, time]:
         """Read the integration's own user-facing helper entities.
