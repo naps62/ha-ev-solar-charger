@@ -171,5 +171,19 @@ def compute_decision(s: Snapshot) -> Decision:
             leftover_w=None,
         )
 
-    # Solar and night sub-modes are handled in subsequent tasks.
-    raise NotImplementedError(f"sub-mode {sub.value} not yet implemented")
+    if sub is SubMode.NIGHT:
+        desired = MAX_AMPS if s.ev_soc < s.target_night_soc else 0
+        return Decision(
+            desired_amps=desired,
+            write_action=_write_action_for(desired, s.last_desired_amps),
+            sub_mode=SubMode.NIGHT,
+            reason=(
+                f"night: soc {s.ev_soc:.0f} < target {s.target_night_soc:.0f} → {MAX_AMPS}A"
+                if desired
+                else f"night: soc {s.ev_soc:.0f} ≥ target {s.target_night_soc:.0f} → off"
+            ),
+            leftover_w=None,
+        )
+
+    # Solar sub-mode in the next task.
+    raise NotImplementedError("solar sub-mode not yet implemented")

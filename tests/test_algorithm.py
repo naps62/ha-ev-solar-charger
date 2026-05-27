@@ -185,3 +185,48 @@ def test_dinner_ignores_soc(base_snapshot: Snapshot) -> None:
     d = compute_decision(s)
     assert d.desired_amps == 6
     assert d.write_action is WriteAction.NONE  # no change
+
+
+def test_night_below_target_charges_at_max(base_snapshot: Snapshot) -> None:
+    """At 23:00 with SOC below night target, charge at MAX."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 23, 0, tzinfo=UTC),
+        ev_soc=60.0,
+        target_night_soc=80.0,
+        last_desired_amps=None,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 16
+    assert d.sub_mode is SubMode.NIGHT
+    assert d.write_action is WriteAction.TURN_ON_AND_SET
+
+
+def test_night_at_target_stops(base_snapshot: Snapshot) -> None:
+    """At 23:00 with SOC at/above night target, stop."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 23, 0, tzinfo=UTC),
+        ev_soc=80.0,
+        target_night_soc=80.0,
+        last_desired_amps=16,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+    assert d.sub_mode is SubMode.NIGHT
+    assert d.write_action is WriteAction.TURN_OFF
+
+
+def test_night_above_target_stays_off(base_snapshot: Snapshot) -> None:
+    """Already at 0, SOC above target → no write."""
+    s = dataclasses.replace(
+        base_snapshot,
+        now=datetime(2026, 5, 27, 2, 0, tzinfo=UTC),
+        sun_state=SunState.BELOW,
+        ev_soc=90.0,
+        target_night_soc=80.0,
+        last_desired_amps=0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 0
+    assert d.write_action is WriteAction.NONE
