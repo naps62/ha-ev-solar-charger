@@ -1,7 +1,7 @@
 {
   "domain": "ev_solar_charger",
   "name": "EV Solar Charger",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "iot_class": "local_polling",
   "config_flow": true,
   "requirements": [],

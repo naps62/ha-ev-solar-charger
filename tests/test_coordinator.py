@@ -352,3 +352,46 @@ async def test_service_call_failure_does_not_crash_tick(hass: HomeAssistant) -> 
     assert result.sub_mode is SubMode.FORCE_MAX
     # Service-call failure is logged, not propagated; coordinator still records intent
     assert coord._last_desired_amps == 14
+
+
+@pytest.mark.asyncio
+async def test_kw_power_sensor_converted_to_w(hass: HomeAssistant) -> None:
+    """Coordinator must read kW sensors as 1000x watts.
+
+    Regression for v0.1.3: Tesla integration's leomobile_charger_power reports
+    in kW (`unit_of_measurement: kW`). If the coordinator treated the value as
+    watts, leftover_w would be undercounted by ~1000x and the integration
+    would chronically under-charge from solar surplus.
+    """
+    hass.states.async_set(
+        "sensor.ev_consumption_kw", "1", {"unit_of_measurement": "kW"}
+    )
+    hass.states.async_set("sensor.grid_import", "0", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.grid_export", "2075", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.ev_soc", "60", {"unit_of_measurement": "%"})
+    hass.states.async_set("binary_sensor.ev_cable", "on")
+    hass.states.async_set("device_tracker.ev", "home")
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    entry_data = {
+        CONF_GRID_IMPORT_SENSOR: "sensor.grid_import",
+        CONF_GRID_EXPORT_SENSOR: "sensor.grid_export",
+        CONF_EV_CONSUMPTION_SENSOR: "sensor.ev_consumption_kw",
+        CONF_EV_SOC_SENSOR: "sensor.ev_soc",
+        CONF_EV_CABLE_SENSOR: "binary_sensor.ev_cable",
+        CONF_EV_LOCATION_TRACKER: "device_tracker.ev",
+    }
+    coord = EVSolarChargerCoordinator(hass=hass, entry_data=entry_data, options={})
+    snapshot = await coord._build_snapshot(
+        mode=Mode.AUTO,
+        enabled=True,
+        target_day_soc=80.0,
+        target_night_soc=80.0,
+        dinner_start=time(16, 0),
+        night_start=time(22, 0),
+    )
+
+    # "1" kW must be read as 1000 W, not 1 W
+    assert snapshot.ev_consumption_w == 1000.0
+    # leftover = -(0 - 2075) + 1000 = 3075 W → ceil(3075/230) = 14 A (clamped to MAX)
+    # The pre-v0.1.3 bug would have given leftover = 2076 W → ceil = 10 A.

@@ -346,6 +346,24 @@ def test_solar_clamps_to_max_amps(base_snapshot: Snapshot) -> None:
     assert d.desired_amps == 14
 
 
+def test_solar_ceil_rounds_up_partial_amp(base_snapshot: Snapshot) -> None:
+    """Partial-amp surplus must round UP (ceil), not nearest, so solar is fully absorbed.
+
+    leftover = 1151 W → 5.004 A. round() would give 5; we want 6, even though it
+    pulls ~229 W from grid on this tick. The trade-off: zero solar export, in
+    exchange for at most ~VOLTAGE watts of grid import per tick.
+    """
+    s = dataclasses.replace(
+        base_snapshot,
+        net_grid_w=-1151.0,
+        ev_consumption_w=0.0,
+        ev_soc=60.0,
+        target_day_soc=80.0,
+    )
+    d = compute_decision(s)
+    assert d.desired_amps == 6, "expected ceil(5.004) = 6, got round behavior"
+
+
 def test_negative_ev_consumption_treated_as_zero(base_snapshot: Snapshot) -> None:
     """Negative EV consumption (bad sensor) should be ignored, not amplify leftover."""
     s = dataclasses.replace(

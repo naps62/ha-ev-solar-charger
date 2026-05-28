@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, time
 from enum import Enum
@@ -194,7 +195,11 @@ def compute_decision(s: Snapshot) -> Decision:
         sanitized_ev_w = s.ev_consumption_w
 
     leftover_w = -s.net_grid_w + sanitized_ev_w
-    raw_amps = round(leftover_w / VOLTAGE)
+    # Use ceil() so any positive surplus is fully absorbed by the EV. Trade-off:
+    # up to ~VOLTAGE watts of grid import per tick in exchange for zero solar
+    # export to grid. Goal: maximize self-consumption, accept small rounding
+    # cost on grid side.
+    raw_amps = math.ceil(leftover_w / VOLTAGE)
 
     if s.ev_soc < s.target_day_soc:
         desired = max(MIN_AMPS, raw_amps)

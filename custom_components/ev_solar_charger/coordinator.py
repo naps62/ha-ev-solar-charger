@@ -71,6 +71,28 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         except (TypeError, ValueError):
             return None
 
+    def _read_power_w(self, entity_id: str | None) -> float | None:
+        """Read a power sensor and return its value in watts.
+
+        Auto-converts based on the sensor's `unit_of_measurement` attribute:
+        kW / kilowatt(s) → multiplied by 1000; W / watt(s) / missing → unchanged.
+        This lets the integration work with any HA power sensor regardless of
+        whether it natively reports in W or kW.
+        """
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return None
+        unit = str(state.attributes.get("unit_of_measurement", "W")).lower()
+        if unit in ("kw", "kilowatt", "kilowatts"):
+            value *= 1000.0
+        return value
+
     def _read_bool(self, entity_id: str | None, on_state: str = "on") -> bool | None:
         if not entity_id:
             return None
@@ -96,12 +118,12 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         return SunState.ABOVE
 
     def _read_net_grid(self) -> float | None:
-        """Return signed net grid power: + import, - export."""
-        net = self._read_float(self.entry_data.get(CONF_NET_GRID_SENSOR))
+        """Return signed net grid power in watts: + import, - export."""
+        net = self._read_power_w(self.entry_data.get(CONF_NET_GRID_SENSOR))
         if net is not None:
             return net
-        imp = self._read_float(self.entry_data.get(CONF_GRID_IMPORT_SENSOR))
-        exp = self._read_float(self.entry_data.get(CONF_GRID_EXPORT_SENSOR))
+        imp = self._read_power_w(self.entry_data.get(CONF_GRID_IMPORT_SENSOR))
+        exp = self._read_power_w(self.entry_data.get(CONF_GRID_EXPORT_SENSOR))
         if imp is None or exp is None:
             return None
         return imp - exp
@@ -120,7 +142,7 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             now=dt_util.now(),
             sun_state=self._read_sun_state(),
             net_grid_w=self._read_net_grid() or 0.0,
-            ev_consumption_w=self._read_float(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR))
+            ev_consumption_w=self._read_power_w(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR))
             or 0.0,
             ev_soc=self._read_float(self.entry_data.get(CONF_EV_SOC_SENSOR)) or 0.0,
             cable_connected=self._read_bool(self.entry_data.get(CONF_EV_CABLE_SENSOR)) or False,
@@ -256,7 +278,7 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         net = self._read_net_grid()
         if net is None:
             return "grid sensor(s) unavailable"
-        if self._read_float(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR)) is None:
+        if self._read_power_w(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR)) is None:
             return "ev consumption sensor unavailable"
         if self._read_float(self.entry_data.get(CONF_EV_SOC_SENSOR)) is None:
             return "ev soc sensor unavailable"
