@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0] - 2026-11-09
+
+### Added
+- **Grid-limit guard** (options flow): pick a near-limit binary sensor and/or a grid usage sensor plus contracted power. Charging pauses while the near-limit sensor is on, and is reduced to fit under the contract minus a safety margin when a usage sensor is set. Applies in every mode, force-max included. Charging resumes only after the limit has been clear for a resume delay (default 300 s).
+- `binary_sensor.ev_solar_charger_grid_limited`, and a `grid-limit` sub-mode while paused.
+- Options changes reload the integration.
+
 ## [0.1.3] - 2026-05-28
 
 ### Fixed

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from datetime import datetime, time
+from dataclasses import dataclass, replace
+from datetime import datetime, time, timedelta
 from enum import Enum
 
 
@@ -27,6 +27,7 @@ class SubMode(Enum):
     DISABLED = "disabled"
     FORCE_MIN = "force-min"
     FORCE_MAX = "force-max"
+    GRID_LIMIT = "grid-limit"
 
 
 class WriteAction(Enum):
@@ -74,6 +75,8 @@ class Decision:
     sub_mode: SubMode
     reason: str
     leftover_w: float | None
+    # Set only when the grid limit lowered desired_amps; 0 means paused.
+    grid_cap_amps: int | None = None
 
 
 def pick_submode(
@@ -237,4 +240,86 @@ def safety_fallback_decision(reason: str, last_desired_amps: int | None) -> Deci
         sub_mode=SubMode.SAFETY_FALLBACK,
         reason=f"safety-fallback: {reason}",
         leftover_w=None,
+    )
+
+
+def grid_cap_amps(
+    *,
+    near_limit: bool,
+    usage_w: float | None,
+    limit_w: float | None,
+    margin_w: float,
+    ev_consumption_w: float,
+) -> int | None:
+    """Return the most amps the grid connection allows right now.
+
+    None means unconstrained, 0 means pause. `usage_w` is the metered power
+    (grid import, including the EV's own draw). The EV's draw is subtracted
+    to get the rest of the house, and the EV gets whatever is left under
+    `limit_w - margin_w`.
+    """
+    if near_limit:
+        return 0
+    if usage_w is None or limit_w is None:
+        return None
+    if ev_consumption_w < 0 or ev_consumption_w > MAX_PLAUSIBLE_EV_W:
+        ev_consumption_w = 0.0
+    other_w = usage_w - ev_consumption_w
+    allowed = math.floor((limit_w - margin_w - other_w) / VOLTAGE)
+    if allowed >= MAX_AMPS:
+        return None
+    if allowed < MIN_AMPS:
+        return 0
+    return allowed
+
+
+@dataclass
+class GridLimiter:
+    """Holds a grid cap until the constraint has eased for `resume_delay`.
+
+    Tightening applies at once; loosening (a higher cap, or no cap) only
+    applies after the looser value has been seen continuously for the delay.
+    This keeps the EV from flapping on/off around the threshold.
+    """
+
+    resume_delay: timedelta
+    held_cap: int | None = None
+    _eased_since: datetime | None = None
+
+    def update(self, now: datetime, cap: int | None) -> int | None:
+        if self.held_cap is None and cap is None:
+            return None
+        if self.held_cap is None or (cap is not None and cap < self.held_cap):
+            self.held_cap = cap
+            self._eased_since = None
+            return self.held_cap
+        if cap == self.held_cap:
+            self._eased_since = None
+            return self.held_cap
+        # Constraint eased: release (or raise) the cap after the delay.
+        if self._eased_since is None:
+            self._eased_since = now
+        if now - self._eased_since >= self.resume_delay:
+            self.held_cap = cap
+            self._eased_since = None
+        return self.held_cap
+
+
+def apply_grid_cap(decision: Decision, cap: int | None, last_desired_amps: int | None) -> Decision:
+    """Lower a decision's amps to the grid cap. Applies to every mode, force-max included."""
+    if cap is None or decision.desired_amps is None or decision.desired_amps <= cap:
+        return decision
+    if cap == 0:
+        sub_mode = SubMode.GRID_LIMIT
+        reason = f"grid limit: paused (was {decision.reason})"
+    else:
+        sub_mode = decision.sub_mode
+        reason = f"grid limit: capped to {cap}A (was {decision.reason})"
+    return replace(
+        decision,
+        desired_amps=cap,
+        write_action=_write_action_for(cap, last_desired_amps),
+        sub_mode=sub_mode,
+        reason=reason,
+        grid_cap_amps=cap,
     )

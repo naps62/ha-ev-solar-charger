@@ -23,6 +23,14 @@ CONF_MIN_AMPS = "min_amps"
 CONF_MAX_AMPS = "max_amps"
 CONF_TICK_SECONDS = "tick_seconds"
 
+# Grid-limit options (all optional, set via the options flow)
+CONF_GRID_NEAR_LIMIT_SENSOR = "grid_near_limit_sensor"
+CONF_GRID_USAGE_SENSOR = "grid_usage_sensor"
+CONF_GRID_LIMIT_ENTITY = "grid_limit_entity"
+CONF_GRID_LIMIT_W = "grid_limit_w"
+CONF_GRID_MARGIN_W = "grid_margin_w"
+CONF_GRID_RESUME_DELAY_SECONDS = "grid_resume_delay_seconds"
+
 # Defaults
 DEFAULT_VOLTAGE = 230
 DEFAULT_MIN_AMPS = 5
@@ -33,6 +41,8 @@ DEFAULT_NIGHT_START = "22:00:00"
 DEFAULT_TARGET_DAY_SOC = 80
 DEFAULT_TARGET_NIGHT_SOC = 80
 DINNER_AMPS = 6
+DEFAULT_GRID_MARGIN_W = 500
+DEFAULT_GRID_RESUME_DELAY_SECONDS = 300
 
 # Safety
 STALE_SENSOR_THRESHOLD_SECONDS = 300  # 5 min

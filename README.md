@@ -10,6 +10,7 @@ A Home Assistant custom integration that dynamically sets your EV's charge curre
 - Two independent SOC targets so you can hold for tomorrow's solar or top up from grid.
 - Force-min / force-max / off overrides for one-off situations.
 - Safety fallback to a conservative 6 A if any required sensor goes stale.
+- Optional grid-limit guard: pauses or reduces charging when the house nears its contracted power, in every mode including force-max.
 
 ## Installation
 
@@ -38,6 +39,18 @@ The config flow asks for:
 - **EV location tracker + home zone** — `device_tracker` and the zone name considered "home".
 - **Solar production sensor** (optional) — for dashboard + install verification.
 
+### Grid limit (optional)
+
+Settings → Devices & Services → EV Solar Charger → Configure. All fields are optional; leave them empty to turn the guard off.
+
+- **Near-limit binary sensor** — charging stops while it reads `on`. A `threshold` helper on a headroom sensor works well (e.g. on below 500 W headroom).
+- **Grid usage sensor** — metered grid import in W or kW, including the EV's own draw. Needs a **contracted power**, either an entity (`input_number`, `number` or `sensor`) or a fixed value in W. Charging is reduced so usage stays under the limit minus the **safety margin** (default 500 W), and stops when less than the minimum current fits.
+- **Resume delay** (default 300 s) — after the limit clears, charging stays paused (or capped) until it has been clear this long, so it doesn't flap around the threshold. A tighter limit always applies at once.
+
+Both inputs can be used together. An unavailable grid-limit input counts as "no limit", so a broken helper never stops charging on its own. Saving the options reloads the integration.
+
+While the guard is acting, `sensor.ev_solar_charger_sub_mode` reads `grid-limit` (when paused), the reason sensor starts with `grid limit:`, and `binary_sensor.ev_solar_charger_grid_limited` is on.
+
 After setup, an "EV Solar Charger" device appears with these entities:
 
 | Entity | Purpose |
@@ -51,9 +64,10 @@ After setup, an "EV Solar Charger" device appears with these entities:
 | `sensor.ev_solar_charger_leftover_w` | current solar surplus available |
 | `sensor.ev_solar_charger_desired_amps` | what the integration wants the EV to draw |
 | `sensor.ev_solar_charger_actual_amps` | what the EV is actually set to |
-| `sensor.ev_solar_charger_sub_mode` | solar / dinner / night / safety-fallback / disabled |
+| `sensor.ev_solar_charger_sub_mode` | solar / dinner / night / force-min / force-max / grid-limit / safety-fallback / disabled |
 | `sensor.ev_solar_charger_last_decision_reason` | short human-readable trace |
 | `binary_sensor.ev_solar_charger_healthy` | overall health |
+| `binary_sensor.ev_solar_charger_grid_limited` | on while the grid limit pauses or reduces charging (attributes: `paused`, `cap_amps`, `held_cap_amps`) |
 
 ## Tuning
 

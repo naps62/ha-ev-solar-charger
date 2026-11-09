@@ -13,11 +13,15 @@ from homeassistant.util import dt as dt_util
 
 from .algorithm import (
     Decision,
+    GridLimiter,
     Mode,
     Snapshot,
+    SubMode,
     SunState,
     WriteAction,
+    apply_grid_cap,
     compute_decision,
+    grid_cap_amps,
     safety_fallback_decision,
 )
 from .const import (
@@ -30,7 +34,15 @@ from .const import (
     CONF_EV_SOC_SENSOR,
     CONF_GRID_EXPORT_SENSOR,
     CONF_GRID_IMPORT_SENSOR,
+    CONF_GRID_LIMIT_ENTITY,
+    CONF_GRID_LIMIT_W,
+    CONF_GRID_MARGIN_W,
+    CONF_GRID_NEAR_LIMIT_SENSOR,
+    CONF_GRID_RESUME_DELAY_SECONDS,
+    CONF_GRID_USAGE_SENSOR,
     CONF_NET_GRID_SENSOR,
+    DEFAULT_GRID_MARGIN_W,
+    DEFAULT_GRID_RESUME_DELAY_SECONDS,
     DEFAULT_TICK_SECONDS,
     DOMAIN,
     STALE_SENSOR_THRESHOLD_SECONDS,
@@ -52,6 +64,13 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         self.options = options
         self._last_desired_amps: int | None = None
         self._first_bad_sensor_ts: datetime | None = None
+        self.grid_limiter = GridLimiter(
+            resume_delay=timedelta(
+                seconds=float(
+                    options.get(CONF_GRID_RESUME_DELAY_SECONDS, DEFAULT_GRID_RESUME_DELAY_SECONDS)
+                )
+            )
+        )
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -127,6 +146,36 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         if imp is None or exp is None:
             return None
         return imp - exp
+
+    def _read_grid_cap(self) -> int | None:
+        """Instantaneous grid cap from the optional grid-limit inputs (None = no limit).
+
+        Unavailable grid-limit inputs are treated as "no limit" so a broken
+        helper never stops charging on its own.
+        """
+        near_limit = bool(self._read_bool(self.options.get(CONF_GRID_NEAR_LIMIT_SENSOR)))
+        limit_w = self._read_float(self.options.get(CONF_GRID_LIMIT_ENTITY))
+        if limit_w is None and self.options.get(CONF_GRID_LIMIT_W):
+            limit_w = float(self.options[CONF_GRID_LIMIT_W])
+        return grid_cap_amps(
+            near_limit=near_limit,
+            usage_w=self._read_power_w(self.options.get(CONF_GRID_USAGE_SENSOR)),
+            limit_w=limit_w,
+            margin_w=float(self.options.get(CONF_GRID_MARGIN_W, DEFAULT_GRID_MARGIN_W)),
+            ev_consumption_w=self._read_power_w(self.entry_data.get(CONF_EV_CONSUMPTION_SENSOR))
+            or 0.0,
+        )
+
+    def grid_refresh_needed(self) -> bool:
+        """Whether a grid-usage change warrants an early tick.
+
+        Usage changes often; only tick early when it would tighten the cap
+        below what the EV is set to, or when a cap is being held.
+        """
+        if self.grid_limiter.held_cap is not None:
+            return True
+        cap = self._read_grid_cap()
+        return cap is not None and (self._last_desired_amps or 0) > cap
 
     async def _build_snapshot(
         self,
@@ -239,15 +288,29 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
         if bad_sensor_reason:
             if self._first_bad_sensor_ts is None:
                 self._first_bad_sensor_ts = now
+            grid_cap = self.grid_limiter.update(now, self._read_grid_cap())
             elapsed = (now - self._first_bad_sensor_ts).total_seconds()
             if elapsed >= STALE_SENSOR_THRESHOLD_SECONDS:
                 decision = safety_fallback_decision(
                     reason=bad_sensor_reason,
                     last_desired_amps=self._last_desired_amps,
                 )
+                decision = apply_grid_cap(decision, grid_cap, self._last_desired_amps)
                 await self._apply_decision(decision)
                 return decision
-            # Hold last-known good for now
+            # Hold last-known good for now, unless that would break the grid limit.
+            if self._last_desired_amps is not None:
+                hold = Decision(
+                    desired_amps=self._last_desired_amps,
+                    write_action=WriteAction.NONE,
+                    sub_mode=SubMode.SAFETY_FALLBACK,
+                    reason=f"holding: {bad_sensor_reason}",
+                    leftover_w=None,
+                )
+                capped = apply_grid_cap(hold, grid_cap, self._last_desired_amps)
+                if capped is not hold:
+                    await self._apply_decision(capped)
+                    return capped
             return None
         else:
             self._first_bad_sensor_ts = None
@@ -261,6 +324,8 @@ class EVSolarChargerCoordinator(DataUpdateCoordinator[Decision | None]):
             night_start=night_start,
         )
         decision = compute_decision(snapshot)
+        grid_cap = self.grid_limiter.update(now, self._read_grid_cap())
+        decision = apply_grid_cap(decision, grid_cap, self._last_desired_amps)
 
         # State reset on gate transitions: if the gate is closed (no-op),
         # forget last_desired_amps so the next tick after re-open writes.

@@ -30,10 +30,12 @@ async def async_get_config_entry_diagnostics(
                 "sub_mode": last.sub_mode.value,
                 "reason": last.reason,
                 "leftover_w": last.leftover_w,
+                "grid_cap_amps": last.grid_cap_amps,
             }
             if last is not None
             else None
         ),
         "last_desired_amps": coord._last_desired_amps,
+        "grid_held_cap_amps": coord.grid_limiter.held_cap,
         "last_update_success": coord.last_update_success,
     }

@@ -25,5 +25,29 @@
       "negative_solar": "Solar production sensor reports a persistent negative value; check clamp direction.",
       "ev_draw_implausible": "EV consumption doesn't match the expected draw for the set charge current."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Grid limit",
+        "description": "Optional. Pause or reduce charging when the house is close to its contracted power. Leave everything empty to turn this off.",
+        "data": {
+          "grid_near_limit_sensor": "Near-limit binary sensor (pause while on)",
+          "grid_usage_sensor": "Grid usage power sensor (import, including the EV)",
+          "grid_limit_entity": "Contracted power entity",
+          "grid_limit_w": "Contracted power (W), if no entity",
+          "grid_margin_w": "Safety margin below the limit (W)",
+          "grid_resume_delay_seconds": "Resume delay (s)"
+        },
+        "data_description": {
+          "grid_near_limit_sensor": "Charging stops while this is on, in every mode including force-max.",
+          "grid_usage_sensor": "With a contracted power set, charging is reduced so usage stays under the limit minus the margin, and stops if less than the minimum current fits.",
+          "grid_resume_delay_seconds": "How long the limit must stay clear before charging resumes or the cap is raised."
+        }
+      }
+    },
+    "error": {
+      "missing_grid_limit": "A grid usage sensor needs a contracted power, either as an entity or in watts."
+    }
   }
 }
