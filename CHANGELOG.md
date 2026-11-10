@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-11-10
+
+### Fixed
+- **Sunset before dinner no longer counts as night.** In winter the sun sets before the dinner window starts, and that gap fell through to night mode, charging at full rate from the grid at peak time. Afternoon hours before dinner now use solar rules whatever the sun state, which means the minimum current while below the day SOC target, or nothing once it's reached.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added

@@ -76,7 +76,9 @@ def test_sun_state_enum_values() -> None:
         (23, 30, SunState.BELOW, SubMode.NIGHT),  # late night
         (5, 30, SunState.BELOW, SubMode.NIGHT),  # pre-dawn, sun still down
         (7, 0, SunState.ABOVE, SubMode.SOLAR),  # post-sunrise
-        (14, 0, SunState.BELOW, SubMode.NIGHT),  # daytime but sun below (eclipse/weather)
+        (14, 0, SunState.BELOW, SubMode.SOLAR),  # afternoon, sun below: still solar
+        (15, 30, SunState.BELOW, SubMode.SOLAR),  # winter: after sunset, before dinner
+        (11, 0, SunState.BELOW, SubMode.NIGHT),  # morning, sun not up yet
     ],
 )
 def test_pick_submode(hour: int, minute: int, sun: SunState, expected: SubMode) -> None:

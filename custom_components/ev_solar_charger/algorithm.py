@@ -89,12 +89,15 @@ def pick_submode(
 
     Rules:
     - dinner window (always wins when active)
-    - else: solar if sun above, else night
+    - before dinner: solar if sun above, or if it's the afternoon. In winter
+      the sun sets before dinner starts, and that gap must not fall through
+      to night (full-rate grid charging at peak time).
+    - else: night
     """
     h = now.time()
     if dinner_start <= h < night_start:
         return SubMode.DINNER
-    if sun_state is SunState.ABOVE and h < dinner_start:
+    if h < dinner_start and (sun_state is SunState.ABOVE or h >= time(12, 0)):
         return SubMode.SOLAR
     return SubMode.NIGHT
 
